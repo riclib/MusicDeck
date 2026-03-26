@@ -19,6 +19,10 @@ class MusicPlayer: ObservableObject {
     @Published var isPlaying: Bool = false
     @Published var playlists: [Playlist] = []
     @Published var pinnedIDs: Set<String> = []
+    @Published var upNext: [MPMediaItem] = []
+
+    private var currentPlaylistItems: [MPMediaItem] = []
+    private var currentStartIndex: Int = 0
 
     var pinnedPlaylists: [Playlist] {
         playlists
@@ -132,12 +136,21 @@ class MusicPlayer: ObservableObject {
             startIndex = 0
         }
 
+        // Build the play order: from startIndex to end, then wrap around
+        var ordered: [MPMediaItem] = []
+        for i in startIndex..<items.count { ordered.append(items[i]) }
+        for i in 0..<startIndex { ordered.append(items[i]) }
+        currentPlaylistItems = ordered
+        currentStartIndex = 0
+
         let descriptor = MPMusicPlayerMediaItemQueueDescriptor(itemCollection: mediaPlaylist)
         descriptor.startItem = items[startIndex]
         player.setQueue(with: descriptor)
         player.shuffleMode = .off
         player.repeatMode = .all
         player.play()
+
+        updateUpNext()
     }
 
     func play() {
@@ -162,6 +175,20 @@ class MusicPlayer: ObservableObject {
 
     func prev() {
         player.skipToPreviousItem()
+    }
+
+    func skipTo(_ item: MPMediaItem) {
+        // Skip forward until we reach the target item
+        guard let idx = currentPlaylistItems.firstIndex(where: { $0.persistentID == item.persistentID }) else { return }
+        guard let currentIdx = currentPlaylistItems.firstIndex(where: { $0.persistentID == player.nowPlayingItem?.persistentID }) else { return }
+
+        if idx > currentIdx {
+            // Skip forward the right number of times
+            let skips = idx - currentIdx
+            for _ in 0..<skips {
+                player.skipToNextItem()
+            }
+        }
     }
 
     // MARK: - Notifications
@@ -192,5 +219,20 @@ class MusicPlayer: ObservableObject {
 
     private func updateNowPlaying() {
         nowPlaying = player.nowPlayingItem
+        updateUpNext()
+    }
+
+    private func updateUpNext() {
+        guard let current = player.nowPlayingItem,
+              !currentPlaylistItems.isEmpty else {
+            upNext = []
+            return
+        }
+
+        // Find current song in our ordered list
+        if let idx = currentPlaylistItems.firstIndex(where: { $0.persistentID == current.persistentID }) {
+            let remaining = Array(currentPlaylistItems.dropFirst(idx + 1))
+            upNext = Array(remaining.prefix(20))
+        }
     }
 }

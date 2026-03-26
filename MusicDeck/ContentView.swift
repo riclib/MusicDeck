@@ -5,30 +5,39 @@ struct ContentView: View {
     @EnvironmentObject var musicPlayer: MusicPlayer
     @State private var showTray = false
     @State private var trayExpanded = false
+    @State private var showQueue = false
+
+    private let queueWidth: CGFloat = 320
+    private let queuePadding: CGFloat = 16
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                // Background + album art
-                backgroundLayer(geometry: geometry)
-                    .onTapGesture {
-                        if showTray {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                showTray = false
-                                trayExpanded = false
-                            }
-                        } else {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                showTray = true
-                            }
-                        }
-                    }
+            let contentOffset: CGFloat = showQueue ? -(queueWidth + queuePadding) / 2 : 0
 
-                // Always-visible transport controls
+            ZStack {
+                // Background — always full screen
+                backgroundBlur(geometry: geometry)
+
+                // Album art + controls — shift when queue is open
                 VStack {
+                    Spacer()
+                    albumArt(geometry: geometry)
                     Spacer()
                     transportControls
                         .padding(.bottom, showTray ? 0 : 40)
+                }
+                .offset(x: contentOffset)
+                .onTapGesture {
+                    if showTray {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            showTray = false
+                            trayExpanded = false
+                        }
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            showTray = true
+                        }
+                    }
                 }
 
                 // Slide-up playlist tray
@@ -37,6 +46,16 @@ struct ContentView: View {
                         Spacer()
                         playlistTray
                             .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    .offset(x: contentOffset)
+                }
+
+                // Up Next queue sidebar
+                if showQueue {
+                    HStack {
+                        Spacer()
+                        queueSidebar
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
             }
@@ -47,42 +66,42 @@ struct ContentView: View {
     // MARK: - Background
 
     @ViewBuilder
-    private func backgroundLayer(geometry: GeometryProxy) -> some View {
+    private func backgroundBlur(geometry: GeometryProxy) -> some View {
         if let item = musicPlayer.nowPlaying,
            let artwork = item.artwork?.image(at: CGSize(width: geometry.size.width, height: geometry.size.height)) {
-            ZStack {
-                Image(uiImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .clipped()
-                    .blur(radius: 20)
-                    .overlay(Color.black.opacity(0.4))
-
-                Image(uiImage: artwork)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: geometry.size.width * 0.7, maxHeight: geometry.size.height * 0.65)
-                    .shadow(radius: 30)
-                    .offset(y: -40)
-            }
+            Image(uiImage: artwork)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+                .blur(radius: 20)
+                .overlay(Color.black.opacity(0.4))
         } else {
-            ZStack {
-                LinearGradient(
-                    colors: [.black, Color(white: 0.15)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+            LinearGradient(
+                colors: [.black, Color(white: 0.15)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
 
-                VStack(spacing: 16) {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 80))
-                        .foregroundColor(.gray)
-                    Text("No Track Playing")
-                        .font(.title2)
-                        .foregroundColor(.gray)
-                }
-                .offset(y: -40)
+    @ViewBuilder
+    private func albumArt(geometry: GeometryProxy) -> some View {
+        if let item = musicPlayer.nowPlaying,
+           let artwork = item.artwork?.image(at: CGSize(width: geometry.size.width, height: geometry.size.height)) {
+            Image(uiImage: artwork)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: geometry.size.width * 0.5, maxHeight: geometry.size.height * 0.55)
+                .shadow(radius: 30)
+        } else {
+            VStack(spacing: 16) {
+                Image(systemName: "music.note")
+                    .font(.system(size: 80))
+                    .foregroundColor(.gray)
+                Text("No Track Playing")
+                    .font(.title2)
+                    .foregroundColor(.gray)
             }
         }
     }
@@ -118,6 +137,16 @@ struct ContentView: View {
                 Button(action: { musicPlayer.next() }) {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 28))
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showQueue.toggle()
+                    }
+                } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 22))
+                        .foregroundColor(showQueue ? .accentColor : .white.opacity(0.6))
                 }
             }
             .foregroundColor(.white)
@@ -232,6 +261,108 @@ struct ContentView: View {
             }
         }
         .padding(.bottom, 16)
+    }
+
+    // MARK: - Queue Sidebar
+
+    private var queueSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Up Next")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showQueue = false
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.white.opacity(0.4))
+                        .font(.title3)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            if musicPlayer.upNext.isEmpty {
+                VStack {
+                    Spacer()
+                    Text("No queue")
+                        .foregroundColor(.gray)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(musicPlayer.upNext.enumerated()), id: \.element.persistentID) { index, item in
+                            QueueRow(item: item, isFirstOfAlbum: isAlbumBoundary(at: index))
+                                .onTapGesture {
+                                    musicPlayer.skipTo(item)
+                                }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 320)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
+        )
+        .padding(.vertical, 20)
+        .padding(.trailing, 16)
+    }
+
+    private func isAlbumBoundary(at index: Int) -> Bool {
+        guard index > 0 else { return true }
+        return musicPlayer.upNext[index].albumPersistentID != musicPlayer.upNext[index - 1].albumPersistentID
+    }
+}
+
+struct QueueRow: View {
+    let item: MPMediaItem
+    var isFirstOfAlbum: Bool = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let artwork = item.artwork?.image(at: CGSize(width: 44, height: 44)) {
+                Image(uiImage: artwork)
+                    .resizable()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 44, height: 44)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title ?? "Unknown")
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(item.artist ?? "Unknown")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .overlay(alignment: .top) {
+            if isFirstOfAlbum {
+                Rectangle()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(height: 1)
+                    .padding(.horizontal, 16)
+            }
+        }
     }
 }
 
