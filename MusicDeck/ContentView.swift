@@ -92,7 +92,7 @@ struct ContentView: View {
             Image(uiImage: artwork)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: geometry.size.width * 0.5, maxHeight: geometry.size.height * 0.55)
+                .frame(maxWidth: geometry.size.width * 0.6, maxHeight: geometry.size.height * 0.65)
                 .shadow(radius: 30)
         } else {
             VStack(spacing: 16) {
@@ -124,6 +124,12 @@ struct ContentView: View {
             }
 
             HStack(spacing: 50) {
+                Button(action: { musicPlayer.toggleShuffle() }) {
+                    Image(systemName: "shuffle")
+                        .font(.system(size: 22))
+                        .foregroundColor(musicPlayer.isShuffling ? .accentColor : .white.opacity(0.6))
+                }
+
                 Button(action: { musicPlayer.prev() }) {
                     Image(systemName: "backward.fill")
                         .font(.system(size: 28))

@@ -5,7 +5,7 @@ import Combine
 struct Playlist: Identifiable {
     let id: String
     let name: String
-    let artwork: UIImage?
+    var artwork: UIImage?
     let mediaPlaylist: MPMediaPlaylist?
 }
 
@@ -17,6 +17,7 @@ class MusicPlayer: ObservableObject {
 
     @Published var nowPlaying: MPMediaItem?
     @Published var isPlaying: Bool = false
+    @Published var isShuffling: Bool = false
     @Published var playlists: [Playlist] = []
     @Published var pinnedIDs: Set<String> = []
     @Published var upNext: [MPMediaItem] = []
@@ -61,6 +62,7 @@ class MusicPlayer: ObservableObject {
             pinnedIDs.insert(playlist.id)
         }
         savePinnedIDs()
+        loadPinnedArtwork()
     }
 
     private func loadPinnedIDs() {
@@ -75,13 +77,37 @@ class MusicPlayer: ObservableObject {
 
     // MARK: - Playlist Resolution
 
-    private static func randomAlbumArt(from playlist: MPMediaPlaylist) -> UIImage? {
-        let size = CGSize(width: 200, height: 200)
-        var items = playlist.items
-        items.shuffle()
-        // Find the first item where artwork actually renders to an image
-        for item in items {
+    private static var artworkCacheDir: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PlaylistArtwork", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    private static func cachedArtwork(for id: String) -> UIImage? {
+        let file = artworkCacheDir.appendingPathComponent("\(id).png")
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private static func cacheArtwork(_ image: UIImage, for id: String) {
+        let file = artworkCacheDir.appendingPathComponent("\(id).png")
+        if let data = image.pngData() {
+            try? data.write(to: file)
+        }
+    }
+
+    private static func randomAlbumArt(from playlist: MPMediaPlaylist, id: String) -> UIImage? {
+        // Check disk cache first
+        if let cached = cachedArtwork(for: id) { return cached }
+
+        let items = playlist.items
+        guard !items.isEmpty else { return nil }
+        let size = CGSize(width: 100, height: 100)
+        for _ in 0..<min(10, items.count) {
+            let item = items[Int.random(in: 0..<items.count)]
             if let image = item.artwork?.image(at: size) {
+                cacheArtwork(image, for: id)
                 return image
             }
         }
@@ -97,17 +123,37 @@ class MusicPlayer: ObservableObject {
 
         let resolved: [Playlist] = collections.compactMap { mediaPlaylist in
             guard let name = mediaPlaylist.name, !name.isEmpty else { return nil }
-            let art = Self.randomAlbumArt(from: mediaPlaylist)
             return Playlist(
                 id: "\(mediaPlaylist.persistentID)",
                 name: name,
-                artwork: art,
+                artwork: nil,
                 mediaPlaylist: mediaPlaylist
             )
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
         DispatchQueue.main.async {
             self.playlists = resolved
+            self.loadPinnedArtwork()
+        }
+    }
+
+    func loadPinnedArtwork() {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            var updates: [(Int, UIImage)] = []
+            for (index, playlist) in playlists.enumerated() {
+                guard pinnedIDs.contains(playlist.id),
+                      playlist.artwork == nil,
+                      let mediaPlaylist = playlist.mediaPlaylist else { continue }
+                if let art = Self.randomAlbumArt(from: mediaPlaylist, id: playlist.id) {
+                    updates.append((index, art))
+                }
+            }
+            DispatchQueue.main.async {
+                for (index, art) in updates {
+                    guard index < self.playlists.count else { continue }
+                    self.playlists[index].artwork = art
+                }
+            }
         }
     }
 
@@ -175,6 +221,15 @@ class MusicPlayer: ObservableObject {
 
     func prev() {
         player.skipToPreviousItem()
+    }
+
+    func toggleShuffle() {
+        if player.shuffleMode == .off {
+            player.shuffleMode = .songs
+        } else {
+            player.shuffleMode = .off
+        }
+        isShuffling = player.shuffleMode != .off
     }
 
     func skipTo(_ item: MPMediaItem) {
